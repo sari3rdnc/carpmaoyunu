@@ -140,7 +140,7 @@
     <!-- Loading -->
     <div id="loadingOverlay">
         <div class="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <div class="text-blue-300 font-bold animate-pulse">Üs ile bağlantı kuruluyor...</div>
+        <div class="text-blue-300 font-bold animate-pulse" id="loadingText">Üs ile bağlantı kuruluyor...</div>
     </div>
 
     <!-- Marka -->
@@ -188,7 +188,6 @@
             <input type="text" id="playerNameInput" oninput="window.updateNameLive()" onblur="window.savePlayerData()" placeholder="Pilot Adı..." class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-center text-white mb-4 focus:outline-none focus:border-blue-500 focus:bg-white/10 transition">
             
             <div class="grid gap-3">
-                <!-- DÜZELTME: Butona tıklayınca savePlayerData çağırılıyor -->
                 <button onclick="window.savePlayerData(); window.goToGameCenter()" class="bg-gradient-to-r from-blue-600 to-purple-600 py-4 rounded-xl font-bold shadow-lg btn-press flex items-center justify-center gap-3 text-lg">
                     🎮 OYUN MERKEZİ
                 </button>
@@ -326,24 +325,37 @@
         </div>
     </div>
 
-    <!-- MAIN MODULE SCRIPT (Firebase & Logic) -->
+    <!-- MAIN MODULE SCRIPT (Hybrid: Firebase + LocalStorage) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // FIREBASE CONFIG
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
+        let isOffline = false;
+        let firebaseApp, firebaseAuth, firebaseDb;
         let currentUser = null;
         let playerData = { name: "Astronot", xp: 0, rank: "Çaylak" };
         let unsubscribeData = null;
 
-        // HELPER FUNCTIONS (Moved inside module scope)
+        // INIT CHECK
+        try {
+            if (typeof __firebase_config === 'undefined') {
+                throw new Error("Local File Detected");
+            }
+            const firebaseConfig = JSON.parse(__firebase_config);
+            firebaseApp = initializeApp(firebaseConfig);
+            firebaseAuth = getAuth(firebaseApp);
+            firebaseDb = getFirestore(firebaseApp);
+            console.log("Firebase modu başlatıldı.");
+        } catch (e) {
+            console.warn("Firebase yapılandırması bulunamadı. Çevrimdışı moda geçiliyor...", e);
+            isOffline = true;
+            document.getElementById('loadingText').textContent = "Çevrimdışı mod başlatılıyor...";
+        }
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // HELPER FUNCTIONS
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
         
@@ -362,7 +374,6 @@
 
         function createStars() {
             const c = document.getElementById('starContainer');
-            // Clear existing if any
             c.innerHTML = '';
             for(let i=0;i<40;i++){
                 const s = document.createElement('div'); s.className='star';
@@ -379,93 +390,111 @@
             setTimeout(() => exp.remove(), 500);
         }
 
-        // AUTH & INIT
+        // --- AUTH LOGIC (HYBRID) ---
         async function initAuth() {
+            if (isOffline) {
+                // LOCAL STORAGE MODE STARTUP
+                setTimeout(() => {
+                    const saved = localStorage.getItem('local_player_data');
+                    if(saved) playerData = JSON.parse(saved);
+                    finishLoading();
+                }, 800);
+                return;
+            }
+
+            // FIREBASE MODE
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
+                await signInWithCustomToken(firebaseAuth, __initial_auth_token);
             } else {
-                await signInAnonymously(auth);
+                await signInAnonymously(firebaseAuth);
             }
         }
-        initAuth();
 
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                // Listen to Firestore updates
-                const docRef = doc(db, 'artifacts', appId, 'users', user.uid, 'gameData', 'profile');
-                
-                unsubscribeData = onSnapshot(docRef, (docSnap) => {
-                    document.getElementById('loadingOverlay').style.opacity = '0';
-                    setTimeout(() => document.getElementById('loadingOverlay').classList.add('hidden'), 500);
+        if(!isOffline) {
+            onAuthStateChanged(firebaseAuth, (user) => {
+                if (user) {
+                    currentUser = user;
+                    const docRef = doc(firebaseDb, 'artifacts', appId, 'users', user.uid, 'gameData', 'profile');
+                    unsubscribeData = onSnapshot(docRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            playerData = docSnap.data();
+                            if(!playerData.name) playerData.name = "Astronot";
+                            if(!playerData.xp && playerData.xp !== 0) playerData.xp = 0;
+                        } else {
+                            saveDataHybrid(); 
+                        }
+                        finishLoading();
+                    }, (error) => {
+                        console.error("Veri okuma hatası:", error);
+                        // Hata olursa offline moda geç (Fallback)
+                        isOffline = true;
+                        finishLoading();
+                    });
+                }
+            });
+        }
 
-                    if (docSnap.exists()) {
-                        playerData = docSnap.data();
-                        // Gelen veride eksik alan varsa varsayılanla tamamla
-                        if(!playerData.name) playerData.name = "Astronot";
-                        if(!playerData.xp && playerData.xp !== 0) playerData.xp = 0;
-                    } else {
-                        // Yeni kullanıcı ise varsayılan veriyi kaydet
-                        saveToFirestore(); 
-                    }
-                    updateUI();
-                    
-                    // Giriş ekranı adını güncelle (sadece boşsa veya sunucudan farklıysa)
-                    const inp = document.getElementById('playerNameInput');
-                    if (inp.value !== playerData.name) inp.value = playerData.name === "Astronot" ? "" : playerData.name;
-                    
-                    // İlk açılışta start screen'i göster
-                    if(document.getElementById('startScreen').classList.contains('hidden') && 
-                       document.getElementById('gameCenterScreen').classList.contains('hidden') &&
-                       document.getElementById('levelSelectScreen').classList.contains('hidden')) {
-                        document.getElementById('startScreen').classList.remove('hidden');
-                    }
-
-                }, (error) => {
-                    console.error("Veri okuma hatası:", error);
-                    document.getElementById('loadingOverlay').innerHTML = '<div class="text-red-400">Bağlantı Hatası</div>';
-                });
+        function finishLoading() {
+            document.getElementById('loadingOverlay').style.opacity = '0';
+            setTimeout(() => document.getElementById('loadingOverlay').classList.add('hidden'), 500);
+            updateUI();
+            
+            const inp = document.getElementById('playerNameInput');
+            if (inp.value !== playerData.name) inp.value = playerData.name === "Astronot" ? "" : playerData.name;
+            
+            if(document.getElementById('startScreen').classList.contains('hidden') && 
+               document.getElementById('gameCenterScreen').classList.contains('hidden') &&
+               document.getElementById('levelSelectScreen').classList.contains('hidden')) {
+                document.getElementById('startScreen').classList.remove('hidden');
             }
-        });
+        }
 
-        // DATA SAVING
-        async function saveToFirestore() {
+        // --- DATA SAVING (HYBRID) ---
+        async function saveDataHybrid() {
+            if(isOffline) {
+                localStorage.setItem('local_player_data', JSON.stringify(playerData));
+                return;
+            }
+
             if (!currentUser) return;
-            const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gameData', 'profile');
+            const docRef = doc(firebaseDb, 'artifacts', appId, 'users', currentUser.uid, 'gameData', 'profile');
             try {
                 await setDoc(docRef, playerData);
             } catch (e) {
-                console.error("Kaydetme hatası:", e);
+                console.error("Kaydetme hatası (Local'e düşülüyor):", e);
+                isOffline = true; // Hata durumunda da offline'a düş
+                localStorage.setItem('local_player_data', JSON.stringify(playerData));
             }
         }
 
-        async function resetFirestoreData() {
-            if (!currentUser) return;
-            if(confirm('Tüm veriler sunucudan silinecek?')) {
-                 const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'gameData', 'profile');
-                 await deleteDoc(docRef);
-                 playerData = { name: "Astronot", xp: 0, rank: "Çaylak" };
-                 updateUI();
-                 location.reload();
+        async function resetDataHybrid() {
+            if(confirm('Tüm veriler silinecek?')) {
+                if(isOffline) {
+                    localStorage.removeItem('local_player_data');
+                } else if (currentUser) {
+                     const docRef = doc(firebaseDb, 'artifacts', appId, 'users', currentUser.uid, 'gameData', 'profile');
+                     await deleteDoc(docRef);
+                }
+                playerData = { name: "Astronot", xp: 0, rank: "Çaylak" };
+                updateUI();
+                location.reload();
             }
         }
 
-        // GLOBAL HELPERS
-        // DÜZELTME: Anlık güncelleme için veriyi memory'e hemen yazıyoruz
+        // EXPORTS TO WINDOW
         window.updateNameLive = () => {
              const val = document.getElementById('playerNameInput').value.trim();
-             playerData.name = val || "Astronot"; // Memory'i güncelle
+             playerData.name = val || "Astronot"; 
              document.getElementById('displayPlayerName').textContent = playerData.name;
         };
 
         window.savePlayerData = () => {
-             // Garanti olsun diye tekrar alıyoruz
              const n = document.getElementById('playerNameInput').value.trim();
              if(n) playerData.name = n;
-             saveToFirestore(); // Veritabanına gönder
+             saveDataHybrid();
         };
         
-        window.resetAllData = resetFirestoreData;
+        window.resetAllData = resetDataHybrid;
 
         // UI UPDATE
         function updateUI() {
@@ -477,8 +506,7 @@
             document.getElementById('xpBarFill').style.width = Math.min(100, (playerData.xp/nx)*100)+'%';
         }
 
-        // --- GAME LOGIC EXPORTS ---
-        
+        // --- GAME LOGIC (UNCHANGED MOSTLY) ---
         let selectedNumbers = new Set();
         let activeGameMode = "";
         let gameTimer = null;
@@ -499,6 +527,8 @@
                 grid.appendChild(btn);
              }
              window.initStudyMenu();
+             // Start auth process
+             initAuth();
         };
 
         window.toggleNumberSelection = (i, btn) => {
@@ -550,7 +580,7 @@
             isGameActive = false; clearInterval(gameTimer); hideAll();
             const xp = Math.ceil(score / 5); 
             playerData.xp += xp; 
-            saveToFirestore(); // Cloud save
+            saveDataHybrid(); // Save logic updated
             document.getElementById('earnedXP').textContent = xp; 
             document.getElementById('gameOverScreen').classList.remove('hidden');
         }
@@ -578,7 +608,6 @@
         }
 
         // --- GAMES ---
-        
         // 1. QUIZ
         let qScore = 0;
         function startQuizGame() { document.getElementById('quizGameScreen').classList.remove('hidden'); qScore = 0; updateQuizScore(); nextQuizQuestion(); }
