@@ -3,22 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Uzay Macerası: Matematik Üssü v18</title>
+    <title>Uzay Macerası: Matematik Üssü v20</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+        /* Türkçe karakter desteği */
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&display=swap&subset=latin-ext');
 
         body {
-            font-family: 'Fredoka', sans-serif;
-            overflow: hidden;
-            touch-action: none;
+            font-family: 'Fredoka', 'Nunito', 'Segoe UI', sans-serif;
             background-color: #0f172a;
             user-select: none;
             -webkit-tap-highlight-color: transparent;
+            /* DEĞİŞİKLİK: Varsayılan olarak kaydırmaya izin ver (Menüler için) */
+            overflow-x: hidden;
+            overflow-y: auto;
+            touch-action: manipulation;
+        }
+
+        /* OYUN MODU: Oyun başladığında bu sınıf body'e eklenir ve kaydırmayı kilitler */
+        body.game-mode {
+            overflow: hidden;
+            touch-action: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
         }
 
         /* --- Ortak Efektler --- */
-        .space-bg { background: radial-gradient(circle at center, #1e1b4b 0%, #020617 100%); height: 100vh; width: 100vw; position: absolute; z-index: -1; }
+        /* DEĞİŞİKLİK: Fixed yapıldı ki scroll edilince arkaplan bitmesin */
+        .space-bg { background: radial-gradient(circle at center, #1e1b4b 0%, #020617 100%); position: fixed; top: 0; left: 0; height: 100vh; width: 100vw; z-index: -1; }
         .star { position: absolute; background: white; border-radius: 50%; animation: twinkle infinite alternate; }
         @keyframes twinkle { 0% { opacity: 0.3; transform: scale(0.8); } 100% { opacity: 1; transform: scale(1.2); } }
         
@@ -26,6 +39,9 @@
             background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px);
             border: 2px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
             border-radius: 24px;
+            /* Yatay modda kenarlara yapışmaması için margin */
+            margin-top: 20px;
+            margin-bottom: 20px;
         }
 
         .btn-press { transition: transform 0.1s; cursor: pointer; }
@@ -46,7 +62,7 @@
         @keyframes shakeAll { 10%, 90% { transform: translate3d(-4px, 0, 0); } 20%, 80% { transform: translate3d(8px, 0, 0); } 30%, 50%, 70% { transform: translate3d(-12px, 0, 0); } 40%, 60% { transform: translate3d(12px, 0, 0); } }
 
         /* --- HAFIZA OYUNU --- */
-        .memory-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; perspective: 1000px; }
+        .memory-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; perspective: 1000px; padding-bottom: 20px; }
         .memory-card {
             background: rgba(255,255,255,0.1); border-radius: 12px; height: 65px;
             display: flex; align-items: center; justify-content: center;
@@ -147,7 +163,7 @@
     <div id="brandBadge" class="fixed top-4 left-4 z-50">
         <div class="flex items-center gap-2 opacity-50 hover:opacity-100 transition">
             <div class="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-            <span class="text-[10px] tracking-widest font-bold">TwoF Games v18</span>
+            <span class="text-[10px] tracking-widest font-bold">TwoF Games v20</span>
         </div>
     </div>
 
@@ -163,7 +179,8 @@
     </div>
 
     <!-- ANA KONTEYNER -->
-    <div class="relative min-h-screen flex flex-col items-center justify-center p-4">
+    <!-- min-h-screen content'i kapsasın diye -->
+    <div class="relative min-h-screen flex flex-col items-center justify-center p-4 w-full">
 
         <!-- 1. GİRİŞ EKRANI -->
         <div id="startScreen" class="glass-panel p-6 max-w-sm w-full text-center relative overflow-hidden slide-up hidden">
@@ -296,7 +313,7 @@
         </div>
 
         <!-- 5. OYUN SONU -->
-        <div id="gameOverScreen" class="hidden absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-6 backdrop-blur-md">
+        <div id="gameOverScreen" class="hidden absolute inset-0 bg-black/95 z-50 flex flex-col items-center justify-center p-6 backdrop-blur-md fixed h-full w-full">
             <div class="text-8xl mb-6 animate-bounce">🏆</div>
             <h2 class="text-4xl font-bold text-white mb-2">Oyun Bitti!</h2>
             <div class="text-center mb-8 bg-white/10 p-6 rounded-3xl w-full max-w-xs border border-white/10">
@@ -426,7 +443,6 @@
                         finishLoading();
                     }, (error) => {
                         console.error("Veri okuma hatası:", error);
-                        // Hata olursa offline moda geç (Fallback)
                         isOffline = true;
                         finishLoading();
                     });
@@ -462,7 +478,7 @@
                 await setDoc(docRef, playerData);
             } catch (e) {
                 console.error("Kaydetme hatası (Local'e düşülüyor):", e);
-                isOffline = true; // Hata durumunda da offline'a düş
+                isOffline = true;
                 localStorage.setItem('local_player_data', JSON.stringify(playerData));
             }
         }
@@ -506,7 +522,7 @@
             document.getElementById('xpBarFill').style.width = Math.min(100, (playerData.xp/nx)*100)+'%';
         }
 
-        // --- GAME LOGIC (UNCHANGED MOSTLY) ---
+        // --- GAME LOGIC ---
         let selectedNumbers = new Set();
         let activeGameMode = "";
         let gameTimer = null;
@@ -527,8 +543,9 @@
                 grid.appendChild(btn);
              }
              window.initStudyMenu();
-             // Start auth process
              initAuth();
+             // Başlangıçta kaydırma kilidini kaldır
+             document.body.classList.remove('game-mode');
         };
 
         window.toggleNumberSelection = (i, btn) => {
@@ -550,8 +567,22 @@
 
         // --- NAVIGATION ---
         function hideAll() { document.querySelectorAll('.glass-panel, [id$="Screen"]').forEach(e => e.classList.add('hidden')); document.getElementById('brandBadge').classList.add('hidden'); }
-        window.backToMenu = () => { playSound('click'); hideAll(); document.getElementById('startScreen').classList.remove('hidden'); document.getElementById('brandBadge').classList.remove('hidden'); }
-        window.goToGameCenter = () => { playSound('click'); hideAll(); document.getElementById('gameCenterScreen').classList.remove('hidden'); }
+        
+        window.backToMenu = () => { 
+            playSound('click'); 
+            hideAll(); 
+            updateUI();
+            document.body.classList.remove('game-mode'); // Kilit aç
+            document.getElementById('startScreen').classList.remove('hidden'); 
+            document.getElementById('brandBadge').classList.remove('hidden'); 
+        }
+        window.goToGameCenter = () => { 
+            playSound('click'); 
+            hideAll(); 
+            updateUI();
+            document.body.classList.remove('game-mode'); // Kilit aç
+            document.getElementById('gameCenterScreen').classList.remove('hidden'); 
+        }
         window.goToStudyMenu = () => { playSound('click'); hideAll(); document.getElementById('studyMenuScreen').classList.remove('hidden'); }
         
         window.prepareGame = (mode) => {
@@ -561,6 +592,9 @@
 
         window.launchSelectedGame = () => {
             playSound('click'); hideAll();
+            // DEĞİŞİKLİK: Oyun başladı, ekranı kilitle
+            document.body.classList.add('game-mode');
+            
             document.getElementById('opsPlayerRocket').style.visibility = 'visible';
             document.getElementById('energyShip').style.visibility = 'visible';
             if(activeGameMode === 'quiz') startQuizGame();
@@ -580,7 +614,11 @@
             isGameActive = false; clearInterval(gameTimer); hideAll();
             const xp = Math.ceil(score / 5); 
             playerData.xp += xp; 
-            saveDataHybrid(); // Save logic updated
+            updateUI(); 
+            saveDataHybrid(); 
+            // Oyun bitti, menüye döndük, kilidi aç
+            document.body.classList.remove('game-mode');
+            
             document.getElementById('earnedXP').textContent = xp; 
             document.getElementById('gameOverScreen').classList.remove('hidden');
         }
